@@ -1,2 +1,2 @@
-# Simulasi-Sewa-Lahan-Bdg
+# Hotel
 Simulasi Sewa Lahan Bdg
