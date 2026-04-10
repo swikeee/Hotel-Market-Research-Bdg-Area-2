@@ -529,6 +529,7 @@ init();
   <button class="btn-add-hotel" id="btn-edit-all" onclick="toggleEditAll()" style="background:#3A5E7A;margin-right:4px;">&#x270F; Edit All</button>
   <button onclick="resetAllEdits()" style="font-family:'Montserrat',sans-serif;font-size:9px;font-weight:600;padding:4px 10px;border-radius:6px;border:1px solid #DED8D0;background:transparent;color:#8A8480;cursor:pointer;" title="Reset semua perubahan inline ke data awal">&#x21BA; Reset Edits</button>
   <button class="btn-add-hotel" onclick="openAddModal()">&#xFF0B; Tambah Kompetitor</button>
+  <button onclick="exportAllToSheets()" id="btn-export" title="Export semua data hotel (original + user) ke Google Sheets" style="font-family:'Montserrat',sans-serif;font-size:10px;font-weight:700;padding:6px 14px;border-radius:8px;border:none;background:#78AA8E;color:#fff;cursor:pointer;display:flex;align-items:center;gap:5px;">&#x2191; Export Semua ke Sheets</button>
 </div>
 
 <!-- ====== ADD/EDIT HOTEL MODAL ====== -->
@@ -1486,6 +1487,103 @@ p2Init=function(){
     p2Render();
   }
 };
+
+// ============================================================
+// EXPORT SEMUA DATA KE SHEETS
+// Push semua hotel (original + user-added + edits) ke Google Sheets
+// ============================================================
+function exportAllToSheets(){
+  if(!GAS_URL){
+    alert('GAS_URL belum diset. Hubungkan ke Google Sheets dulu.');
+    return;
+  }
+  const btn = document.getElementById('btn-export');
+  const origText = btn ? btn.innerHTML : '';
+  if(btn){ btn.innerHTML='⏳ Mengexport...'; btn.disabled=true; }
+
+  // Rebuild dulu agar allHotels up to date
+  rebuildAllHotels();
+
+  // Pisahkan user hotels dan edits untuk dikirim
+  const userHotels = loadUserHotels();
+  const edits      = loadEdits();
+
+  // Buat juga array semua hotel original (dari MD) dalam format yang bisa disimpan
+  // agar sheet mencerminkan SELURUH data yang tampil di HTML
+  const allOriginal = [];
+  const ccMap = {};
+  GEOJSON.features.forEach(f=>{
+    if(f.properties.cc) ccMap[f.properties.cc]={name:f.properties.name||'',kabkota:f.properties.kabkota||''};
+  });
+  Object.entries(MD).forEach(([cc,d])=>{
+    const geo = ccMap[cc]||{};
+    (d.hotels||[]).forEach((h,i)=>{
+      const uid  = 'orig_'+cc+'_'+i;
+      const edit = edits[uid]||{};
+      const starCount = edit.stars!==undefined ? edit.stars : ((h.s||'').match(/★/g)||[]).length;
+      const rateNum   = edit.rateNum!==undefined ? edit.rateNum : parseRate(h.r||'');
+      const occ       = (edit.occ!==undefined&&edit.occ>0) ? edit.occ : (d.occ||0);
+      const miceCapNum= edit.micecap!==undefined ? edit.micecap : (parseInt((d.mice?.cap||'0').replace(/[^0-9]/g,''))||0);
+      const miceRateK = edit.micerate!==undefined ? edit.micerate : (parseInt((d.mice?.rate||'0').replace(/[^0-9]/g,''))||0);
+      allOriginal.push({
+        uid, type:'original', cc,
+        name    : edit.name!==undefined ? edit.name : (h.n||''),
+        kec     : edit.kec!==undefined  ? edit.kec  : (geo.name||cc),
+        kab     : edit.kab!==undefined  ? edit.kab  : (geo.kabkota||''),
+        cat     : edit.cat!==undefined  ? edit.cat  : (starCount>=4?'up':starCount>=3?'mid':'low'),
+        stars   : starCount,
+        rateNum, occ, miceCapNum,
+        miceRate: miceRateK?'Rp '+miceRateK+'K/pax':'',
+        insight : edit.insight!==undefined ? edit.insight : (d.insight||'')
+      });
+    });
+  });
+
+  // Gabungkan: original dulu, lalu user-added
+  const allHotelsForExport = [...allOriginal, ...userHotels];
+
+  const payload = {
+    action     : 'save',
+    userHotels : allHotelsForExport,
+    edits      : edits
+  };
+
+  setSyncStatus('syncing');
+  fetch(GAS_URL, {
+    method : 'POST',
+    headers: {'Content-Type':'text/plain'},
+    body   : JSON.stringify(payload)
+  })
+  .then(r=>r.json())
+  .then(data=>{
+    if(data&&data.ok){
+      setSyncStatus('ok');
+      alert('✅ Berhasil! '+allHotelsForExport.length+' hotel ('+allOriginal.length+' original + '+userHotels.length+' tambahan) ter-export ke Google Sheets.');
+    } else {
+      throw new Error(data&&data.error||'Unknown error');
+    }
+  })
+  .catch(err=>{
+    setSyncStatus('error');
+    // Fallback via GET
+    const encoded = encodeURIComponent(JSON.stringify(payload));
+    fetch(GAS_URL+'?action=save&data='+encoded)
+      .then(r=>r.json())
+      .then(d=>{
+        if(d&&d.ok){
+          setSyncStatus('ok');
+          alert('✅ Export berhasil via fallback! '+allHotelsForExport.length+' hotel tersimpan ke Sheets.');
+        } else {
+          setSyncStatus('error');
+          alert('❌ Gagal export: '+JSON.stringify(d));
+        }
+      })
+      .catch(e2=>{ setSyncStatus('error'); alert('❌ Gagal: '+e2.message); });
+  })
+  .finally(()=>{
+    if(btn){ btn.innerHTML=origText; btn.disabled=false; }
+  });
+}
 
 // Close modal on overlay click
 document.getElementById('hotel-modal').addEventListener('click',function(e){
