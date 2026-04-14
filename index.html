@@ -1061,10 +1061,11 @@ function scheduleSync(){
 
 function pushToSheets(){
   if(!GAS_URL) return;
+  // Sync rutin: hanya kirim user-added hotels & edits (tidak hapus data original di sheet)
   const payload = {
-    action: 'save',
-    userHotels: loadUserHotels(),
-    edits: loadEdits()
+    action     : 'save',
+    userHotels : loadUserHotels(),
+    edits      : loadEdits()
   };
   setSyncStatus('syncing');
   // Kirim via fetch dengan mode cors — GAS deployed as "Anyone" support CORS
@@ -1542,9 +1543,11 @@ function exportAllToSheets(){
   // Gabungkan: original dulu, lalu user-added
   const allHotelsForExport = [...allOriginal, ...userHotels];
 
+  // Export penuh: kirim ke sheet AllHotels (tidak hapus UserHotels)
   const payload = {
-    action     : 'save',
-    userHotels : allHotelsForExport,
+    action     : 'exportAll',
+    allHotels  : allHotelsForExport,   // semua hotel → sheet AllHotels
+    userHotels : loadUserHotels(),     // hanya user-added → sheet UserHotels
     edits      : edits
   };
 
@@ -1558,7 +1561,7 @@ function exportAllToSheets(){
   .then(data=>{
     if(data&&data.ok){
       setSyncStatus('ok');
-      alert('✅ Berhasil! '+allHotelsForExport.length+' hotel ('+allOriginal.length+' original + '+userHotels.length+' tambahan) ter-export ke Google Sheets.');
+      alert('✅ Berhasil!\n\n'+allHotelsForExport.length+' hotel ter-export ke sheet AllHotels\n('+allOriginal.length+' original + '+loadUserHotels().length+' tambahan)\n\nSheet UserHotels tetap aman.');
     } else {
       throw new Error(data&&data.error||'Unknown error');
     }
